@@ -389,7 +389,8 @@ async def run() -> None:
     write_file("prx11-all.txt", all_raw)
 
     # ====== آمار ======
-    iran_ts = datetime.utcnow().timestamp() + 3.5 * 3600
+    from datetime import datetime, timezone
+iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
     iran_str = datetime.fromtimestamp(iran_ts).strftime("%Y-%m-%d %H:%M:%S")
     with open(AUTO_UPDATE_FILE, "w", encoding="utf-8") as f:
         f.write(f"Auto Update: {iran_str}")
