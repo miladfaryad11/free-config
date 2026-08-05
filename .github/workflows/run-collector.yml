@@ -1,32 +1,38 @@
-name: Run Proxy Collector
+name: Collect and Publish
 
 on:
   schedule:
-    - cron: '37 */6 * * *'
-      timezone: 'Asia/Tehran'
-  workflow_dispatch:
+    - cron: '0 */6 * * *'   # هر ۶ ساعت یکبار اجرا می‌شود
+  workflow_dispatch:        # امکان اجرای دستی
 
 jobs:
-  collect:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        persist-credentials: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+    - name: Install dependencies
+      run: |
+        pip install aiohttp
 
-      - name: Run the collector script
-        run: python main.py
+    - name: Run collector
+      run: python main.py
 
-      - name: Upload generated files
-        uses: actions/upload-artifact@v4
-        with:
-          name: proxy-files
-          path: output/
+    - name: Commit and push output files
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add output/
+        # اگر تغییری وجود داشته باشد، commit می‌کند
+        git diff --staged --quiet || git commit -m "Auto-update configs $(date '+%Y-%m-%d %H:%M:%S')"
+        git push
