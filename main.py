@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import asyncio
 import aiohttp
 import base64
@@ -11,28 +12,13 @@ from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 from urllib.parse import unquote
 
-OUTPUT_DIR = "output/subscriptions"
-REPORT_FILE = "output/PRX11-REPORT.json"
-LOGGER_FILE = "output/PRX11-LOGGER.json"
-AUTO_UPDATE_FILE = "output/AUTO_UPDATE.txt"
-
-SOURCES: Dict[str, List[str]] = {
-    "vless": [
-        "https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/vless.txt",
-    ],
-    "vmess": [
-        "https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/vmess.txt",
-    ],
-    "trojan": [
-        "https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/trojan.txt",
-    ],
-    "ss": [
-        "https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/ss.txt",
-    ],
-    "frag": [
-        "https://raw.githubusercontent.com/hiddify/hiddify-app/refs/heads/main/test.configs/fragment",
-    ],
-}
+# ==========================  تنظیمات پایه  ==========================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # دایرکتوری اسکریپت
+SOURCES_FILE = os.path.join(BASE_DIR, "sources.json")          # فایل منابع
+OUTPUT_DIR = os.path.join(BASE_DIR, "output/subscriptions")
+REPORT_FILE = os.path.join(BASE_DIR, "output/PRX11-REPORT.json")
+LOGGER_FILE = os.path.join(BASE_DIR, "output/PRX11-LOGGER.json")
+AUTO_UPDATE_FILE = os.path.join(BASE_DIR, "output/AUTO_UPDATE.txt")
 
 ENABLE_GEOIP = True
 ENABLE_LATENCY = True
@@ -41,21 +27,53 @@ MAX_ENRICH_LATENCY = 500
 GEOIP_URL = "http://ip-api.com/json/{host}?fields=status,country,countryCode"
 
 COUNTRY_PRIORITY: Dict[str, int] = {
-    "DE": 9,
-    "FI": 9,
-    "NL": 9,
-    "SE": 8,
-    "CH": 8,
-    "AT": 7,
-    "US": 7,
-    "CA": 7,
-    "FR": 6,
-    "GB": 6,
-    "SG": 6,
-    "AU": 6,
-    "": 0,
+    "DE": 9, "FI": 9, "NL": 9, "SE": 8, "CH": 8,
+    "AT": 7, "US": 7, "CA": 7, "FR": 6, "GB": 6,
+    "SG": 6, "AU": 6, "": 0,
 }
 
+# ==========================  توابع کمکی  ==========================
+
+def load_sources() -> Dict[str, List[str]]:
+    """بارگذاری منابع از فایل JSON؛ در صورت نبود، از مقدار پیش‌فرض استفاده می‌کند."""
+    default = {
+        "vless": ["https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/vless.txt"],
+        "vmess": ["https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/vmess.txt"],
+        "trojan": ["https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/trojan.txt"],
+        "ss": ["https://raw.githubusercontent.com/SoliSpirit/v2ray-configs/refs/heads/main/Protocols/ss.txt"],
+        "frag": ["https://raw.githubusercontent.com/hiddify/hiddify-app/refs/heads/main/test.configs/fragment"],
+    }
+    if not os.path.exists(SOURCES_FILE):
+        # در صورت نبود فایل، یک فایل پیش‌فرض می‌سازیم
+        with open(SOURCES_FILE, "w", encoding="utf-8") as f:
+            json.dump(default, f, indent=2)
+        return default
+    try:
+        with open(SOURCES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # فقط پروتکل‌های معتبر را نگه می‌داریم
+        return {k: v for k, v in data.items() if k in default}
+    except Exception as e:
+        print(f"خطا در خواندن {SOURCES_FILE}: {e} — از مقدار پیش‌فرض استفاده می‌شود.")
+        return default
+
+def ensure_dirs() -> None:
+    """ساخت پوشه‌های خروجی با مدیریت خطا و بررسی وجود فایل همنام."""
+    try:
+        # اگر مسیر به‌صورت فایل وجود دارد، حذفش می‌کنیم
+        if os.path.isfile(OUTPUT_DIR):
+            os.remove(OUTPUT_DIR)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        parent = os.path.dirname(REPORT_FILE)
+        if os.path.isfile(parent):
+            os.remove(parent)
+        os.makedirs(parent, exist_ok=True)
+    except Exception as e:
+        print(f"⚠️ خطا در ایجاد پوشه‌ها: {e}")
+        raise
+
+# ==========================  مدل داده  ==========================
 
 @dataclass
 class ConfigEntry:
@@ -69,6 +87,7 @@ class ConfigEntry:
     latency_ms: Optional[float] = None
     quality_score: Optional[float] = None
 
+# ==========================  توابع تجزیه  ==========================
 
 def parse_vless(line: str) -> ConfigEntry:
     identity, host, port = None, None, None
@@ -85,7 +104,6 @@ def parse_vless(line: str) -> ConfigEntry:
     except Exception:
         pass
     return ConfigEntry("vless", line, identity or line, host, port)
-
 
 def parse_vmess(line: str) -> ConfigEntry:
     identity, host, port = None, None, None
@@ -110,7 +128,6 @@ def parse_vmess(line: str) -> ConfigEntry:
         pass
     return ConfigEntry("vmess", line, identity or line, host, port)
 
-
 def parse_trojan(line: str) -> ConfigEntry:
     identity, host, port = None, None, None
     try:
@@ -126,7 +143,6 @@ def parse_trojan(line: str) -> ConfigEntry:
     except Exception:
         pass
     return ConfigEntry("trojan", line, identity or line, host, port)
-
 
 def parse_ss(line: str) -> ConfigEntry:
     identity, host, port = None, None, None
@@ -147,10 +163,8 @@ def parse_ss(line: str) -> ConfigEntry:
         pass
     return ConfigEntry("ss", line, identity or line, host, port)
 
-
 def parse_frag(line: str) -> ConfigEntry:
     return ConfigEntry("frag", line, line)
-
 
 def parse_config(proto: str, line: str) -> Optional[ConfigEntry]:
     l = line.strip().lower()
@@ -168,17 +182,12 @@ def parse_config(proto: str, line: str) -> Optional[ConfigEntry]:
         return parse_frag(line.strip())
     return ConfigEntry(proto, line.strip(), line.strip())
 
+# ==========================  فیلترها  ==========================
 
 FAKE_PATTERNS = [
-    r"free.*vpn",
-    r"fake",
-    r"test",
-    r"example",
-    r"temp",
-    r"speedtest",
-    r"xxxx",
+    r"free.*vpn", r"fake", r"test", r"example",
+    r"temp", r"speedtest", r"xxxx",
 ]
-
 
 def is_fake(entry: ConfigEntry) -> bool:
     txt = entry.raw.lower()
@@ -186,7 +195,6 @@ def is_fake(entry: ConfigEntry) -> bool:
         if re.search(p, txt):
             return True
     return False
-
 
 def dedupe_entries(entries: List[ConfigEntry]) -> List[ConfigEntry]:
     seen = set()
@@ -198,11 +206,7 @@ def dedupe_entries(entries: List[ConfigEntry]) -> List[ConfigEntry]:
             out.append(e)
     return out
 
-
-def ensure_dirs() -> None:
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(os.path.dirname(REPORT_FILE), exist_ok=True)
-
+# ==========================  غنی‌سازی (GeoIP & Latency)  ==========================
 
 async def geoip_lookup(host: str, session: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
     if not host:
@@ -215,7 +219,6 @@ async def geoip_lookup(host: str, session: aiohttp.ClientSession) -> Tuple[Optio
     except Exception:
         pass
     return None, None
-
 
 async def measure_latency(entry: ConfigEntry, session: aiohttp.ClientSession) -> Optional[float]:
     if not entry.host:
@@ -230,7 +233,6 @@ async def measure_latency(entry: ConfigEntry, session: aiohttp.ClientSession) ->
         return round((time.monotonic() - start) * 1000, 1)
     except Exception:
         return None
-
 
 async def enrich_entries(entries: List[ConfigEntry], session: aiohttp.ClientSession) -> None:
     geo_targets = entries[:MAX_ENRICH_GEOIP] if ENABLE_GEOIP else []
@@ -257,24 +259,25 @@ async def enrich_entries(entries: List[ConfigEntry], session: aiohttp.ClientSess
     if tasks:
         await asyncio.gather(*tasks)
 
+# ==========================  دریافت داده از اینترنت  ==========================
 
 async def fetch_url(url: str, session: aiohttp.ClientSession) -> List[str]:
     try:
         async with session.get(url, timeout=25) as r:
             text = await r.text()
             return [line.strip() for line in text.splitlines() if line.strip()]
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ خطا در دریافت {url}: {e}")
         return []
 
-
-async def fetch_all() -> Tuple[Dict[str, List[ConfigEntry]], int, int]:
+async def fetch_all(sources: Dict[str, List[str]]) -> Tuple[Dict[str, List[ConfigEntry]], int, int]:
     async with aiohttp.ClientSession() as session:
         tasks: List[Tuple[str, asyncio.Task]] = []
-        for proto, urls in SOURCES.items():
+        for proto, urls in sources.items():
             for u in urls:
                 tasks.append((proto, asyncio.create_task(fetch_url(u, session))))
 
-        raw_lines: Dict[str, List[str]] = {k: [] for k in SOURCES.keys()}
+        raw_lines: Dict[str, List[str]] = {k: [] for k in sources.keys()}
 
         for proto, task in tasks:
             try:
@@ -283,6 +286,7 @@ async def fetch_all() -> Tuple[Dict[str, List[ConfigEntry]], int, int]:
             except Exception:
                 pass
 
+        # حذف کامنت‌ها از پروتکل frag
         if "frag" in raw_lines:
             raw_lines["frag"] = [
                 l for l in raw_lines["frag"]
@@ -305,18 +309,18 @@ async def fetch_all() -> Tuple[Dict[str, List[ConfigEntry]], int, int]:
 
         await enrich_entries(entries, session)
 
-        grouped: Dict[str, List[ConfigEntry]] = {k: [] for k in SOURCES.keys()}
+        grouped: Dict[str, List[ConfigEntry]] = {k: [] for k in sources.keys()}
         for e in entries:
             grouped.setdefault(e.proto, []).append(e)
 
         return grouped, initial_count, dedup_count
 
+# ==========================  محاسبه کیفیت و فیلوور  ==========================
 
 def compute_quality(e: ConfigEntry) -> None:
     country_weight = COUNTRY_PRIORITY.get(e.country_code or "", 0)
     lat = e.latency_ms if e.latency_ms is not None else 350.0
     e.quality_score = country_weight * 10 - lat * 0.3
-
 
 def auto_failover_hiddify(vless_entries: List[ConfigEntry]) -> List[str]:
     scored: List[ConfigEntry] = []
@@ -327,7 +331,6 @@ def auto_failover_hiddify(vless_entries: List[ConfigEntry]) -> List[str]:
     top = scored[:100]
     return [e.raw for e in top]
 
-
 HIDDIFY_HEADER = """#profile-title: base64:8J+UpSBGcmFnbWVudCDwn5Sl
 #profile-update-interval: 24
 #subscription-userinfo: upload=0; download=0; total=10737418240000000; expire=2546249531
@@ -337,11 +340,17 @@ HIDDIFY_HEADER = """#profile-title: base64:8J+UpSBGcmFnbWVudCDwn5Sl
 #remote-dns-address: https://sky.rethinkdns.com/dns-query
 """
 
+# ==========================  تابع اصلی  ==========================
 
 async def run() -> None:
-    ensure_dirs()
+    print("🔄 بارگذاری منابع از فایل sources.json ...")
+    sources = load_sources()
+    print(f"✅ منابع بارگذاری شدند: {list(sources.keys())}")
 
-    grouped, initial_count, dedup_count = await fetch_all()
+    ensure_dirs()
+    print("📁 پوشه‌های خروجی آماده‌اند.")
+
+    grouped, initial_count, dedup_count = await fetch_all(sources)
 
     vless = grouped.get("vless", [])
     vmess = grouped.get("vmess", [])
@@ -358,16 +367,17 @@ async def run() -> None:
     hiddify_lines = auto_failover_hiddify(vless)
     insta_lines = frag_raw
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # ====== نوشتن فایل‌های خروجی ======
+    def write_file(name: str, lines: List[str]) -> None:
+        path = os.path.join(OUTPUT_DIR, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        print(f"📄 نوشته شد: {path} ({len(lines)} خط)")
 
-    with open(os.path.join(OUTPUT_DIR, "prx11-vless.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(vless_raw))
-    with open(os.path.join(OUTPUT_DIR, "prx11-vmess.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(vmess_raw))
-    with open(os.path.join(OUTPUT_DIR, "prx11-trojan.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(trojan_raw))
-    with open(os.path.join(OUTPUT_DIR, "prx11-ss.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(ss_raw))
+    write_file("prx11-vless.txt", vless_raw)
+    write_file("prx11-vmess.txt", vmess_raw)
+    write_file("prx11-trojan.txt", trojan_raw)
+    write_file("prx11-ss.txt", ss_raw)
 
     with open(os.path.join(OUTPUT_DIR, "prx11-hiddify.txt"), "w", encoding="utf-8") as f:
         f.write(HIDDIFY_HEADER + "\n" + "\n".join(hiddify_lines))
@@ -376,9 +386,9 @@ async def run() -> None:
 
     all_raw = vless_raw + vmess_raw + trojan_raw + ss_raw
     all_raw = list(dict.fromkeys(all_raw))
-    with open(os.path.join(OUTPUT_DIR, "prx11-all.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(all_raw))
+    write_file("prx11-all.txt", all_raw)
 
+    # ====== آمار ======
     iran_ts = datetime.utcnow().timestamp() + 3.5 * 3600
     iran_str = datetime.fromtimestamp(iran_ts).strftime("%Y-%m-%d %H:%M:%S")
     with open(AUTO_UPDATE_FILE, "w", encoding="utf-8") as f:
@@ -420,12 +430,16 @@ async def run() -> None:
     with open(LOGGER_FILE, "w", encoding="utf-8") as f:
         json.dump(log_data, f, indent=2, ensure_ascii=False)
 
-    print("Enterprise Collector completed at", iran_str)
-
+    print("✅ جمع‌آوری با موفقیت انجام شد.")
+    print(f"📊 گزارش در {LOGGER_FILE} ذخیره گردید.")
 
 def main() -> None:
-    asyncio.run(run())
-
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        print("⏹️ اجرا توسط کاربر متوقف شد.")
+    except Exception as e:
+        print(f"❌ خطای غیرمنتظره: {e}")
 
 if __name__ == "__main__":
     main()
