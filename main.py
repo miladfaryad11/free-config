@@ -390,7 +390,8 @@ async def run() -> None:
 
     # ====== آمار ======
     from datetime import datetime, timezone
-iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
+# ...
+   iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
     iran_str = datetime.fromtimestamp(iran_ts).strftime("%Y-%m-%d %H:%M:%S")
     with open(AUTO_UPDATE_FILE, "w", encoding="utf-8") as f:
         f.write(f"Auto Update: {iran_str}")
