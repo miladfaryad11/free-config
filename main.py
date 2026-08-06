@@ -8,13 +8,13 @@ import re
 import statistics
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple
 from urllib.parse import unquote
 
 # ==========================  تنظیمات پایه  ==========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # دایرکتوری اسکریپت
-SOURCES_FILE = os.path.join(BASE_DIR, "sources.json")          # فایل منابع
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SOURCES_FILE = os.path.join(BASE_DIR, "sources.json")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output/subscriptions")
 REPORT_FILE = os.path.join(BASE_DIR, "output/PRX11-REPORT.json")
 LOGGER_FILE = os.path.join(BASE_DIR, "output/PRX11-LOGGER.json")
@@ -44,14 +44,12 @@ def load_sources() -> Dict[str, List[str]]:
         "frag": ["https://raw.githubusercontent.com/hiddify/hiddify-app/refs/heads/main/test.configs/fragment"],
     }
     if not os.path.exists(SOURCES_FILE):
-        # در صورت نبود فایل، یک فایل پیش‌فرض می‌سازیم
         with open(SOURCES_FILE, "w", encoding="utf-8") as f:
             json.dump(default, f, indent=2)
         return default
     try:
         with open(SOURCES_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # فقط پروتکل‌های معتبر را نگه می‌داریم
         return {k: v for k, v in data.items() if k in default}
     except Exception as e:
         print(f"خطا در خواندن {SOURCES_FILE}: {e} — از مقدار پیش‌فرض استفاده می‌شود.")
@@ -60,7 +58,6 @@ def load_sources() -> Dict[str, List[str]]:
 def ensure_dirs() -> None:
     """ساخت پوشه‌های خروجی با مدیریت خطا و بررسی وجود فایل همنام."""
     try:
-        # اگر مسیر به‌صورت فایل وجود دارد، حذفش می‌کنیم
         if os.path.isfile(OUTPUT_DIR):
             os.remove(OUTPUT_DIR)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -286,7 +283,6 @@ async def fetch_all(sources: Dict[str, List[str]]) -> Tuple[Dict[str, List[Confi
             except Exception:
                 pass
 
-        # حذف کامنت‌ها از پروتکل frag
         if "frag" in raw_lines:
             raw_lines["frag"] = [
                 l for l in raw_lines["frag"]
@@ -389,9 +385,7 @@ async def run() -> None:
     write_file("prx11-all.txt", all_raw)
 
     # ====== آمار ======
-    from datetime import datetime, timezone
-# ...
-   iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
+    iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
     iran_str = datetime.fromtimestamp(iran_ts).strftime("%Y-%m-%d %H:%M:%S")
     with open(AUTO_UPDATE_FILE, "w", encoding="utf-8") as f:
         f.write(f"Auto Update: {iran_str}")
