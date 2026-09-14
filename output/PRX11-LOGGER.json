@@ -1,11 +1,101 @@
 {
-  "updated_at_iran": "2026-09-14 21:11:29",
-  "initial_configs": 9189,
-  "after_dedup": 3677,
-  "removed_duplicates": 5512,
+  "updated_at_iran": "2026-09-15 00:57:39",
+  "initial_configs": 9009,
+  "after_dedup": 3643,
+  "removed_duplicates": 5366,
   "country_distribution": {
-    "??": 3673
+    "NL": 13,
+    "JP": 1,
+    "US": 27,
+    "DE": 15,
+    "CA": 22,
+    "GB": 3,
+    "FI": 6,
+    "??": 3512,
+    "TW": 1,
+    "RU": 3,
+    "RS": 1,
+    "IR": 2,
+    "LT": 3,
+    "CN": 1,
+    "NO": 2,
+    "UA": 1,
+    "TR": 4,
+    "SE": 5,
+    "SG": 2,
+    "FR": 2,
+    "IT": 1,
+    "PL": 6,
+    "CZ": 2,
+    "EE": 2,
+    "HK": 1,
+    "SC": 1
   },
-  "latency_summary_ms": {},
-  "top10_fastest_countries": []
+  "latency_summary_ms": {
+    "CA": {
+      "avg": 962.1,
+      "min": 67.6,
+      "max": 2588.0
+    },
+    "FI": {
+      "avg": 258.7,
+      "min": 258.7,
+      "max": 258.7
+    },
+    "US": {
+      "avg": 1082.4,
+      "min": 253.3,
+      "max": 2234.2
+    },
+    "DE": {
+      "avg": 592.5,
+      "min": 592.5,
+      "max": 592.5
+    },
+    "CZ": {
+      "avg": 2080.7,
+      "min": 2080.7,
+      "max": 2080.7
+    },
+    "NL": {
+      "avg": 322.2,
+      "min": 322.2,
+      "max": 322.2
+    },
+    "??": {
+      "avg": 898.4,
+      "min": 37.5,
+      "max": 2725.7
+    }
+  },
+  "top10_fastest_countries": [
+    [
+      "FI",
+      258.7
+    ],
+    [
+      "NL",
+      322.2
+    ],
+    [
+      "DE",
+      592.5
+    ],
+    [
+      "??",
+      898.4
+    ],
+    [
+      "CA",
+      962.1
+    ],
+    [
+      "US",
+      1082.4
+    ],
+    [
+      "CZ",
+      2080.7
+    ]
+  ]
 }
