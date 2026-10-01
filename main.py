@@ -89,6 +89,23 @@ COUNTRY_PRIORITY: Dict[str, int] = {
     "SG": 6, "AU": 6, "PL": 5, "RO": 5, "TR": 4, "IR": 4,
 }
 
+# ==========================  محدودیت و تنوع خروجی  ==========================
+# حداکثر تعداد کانفیگ در هر فایل پروتکل (فایل «همه» محدودیتی ندارد)
+MAX_PER_FILE = 1000
+
+# حداکثر تعداد کانفیگ در فایل Hiddify
+HIDDIFY_LIMIT = 200
+
+# کشورهای محبوب که کانفیگ‌های Hiddify بین آن‌ها به‌طور متوازن تقسیم می‌شود.
+# ترتیب مهم است: هر کشور به‌نوبت از لیست برداشته می‌شود (round-robin).
+POPULAR_COUNTRIES: List[str] = [
+    "DE", "NL", "FR", "TR", "AE", "US", "GB", "FI", "SE", "CH",
+    "AT", "CA", "PL", "SG", "AU", "RO", "IR", "JP", "HK", "IT",
+]
+
+# سهمیه‌ی هر کشور در فایل Hiddify (حداکثر). صفر = بی‌نهایت.
+HIDDIFY_PER_COUNTRY = 0
+
 # پورت‌های غیراستاندارد/مشکوک که پروکسی روی آن‌ها معمولاً کار نمی‌کند
 VALID_PORTS = {80, 443, 2052, 2053, 2082, 2083, 2086, 2087,
                2095, 2096, 8080, 8443, 8880}
@@ -557,6 +574,56 @@ def sort_by_quality(entries: List[ConfigEntry]) -> List[ConfigEntry]:
         compute_quality(e)
     return sorted(entries, key=lambda x: -(x.quality_score if x.quality_score is not None else -9999))
 
+def cap_entries(entries: List[ConfigEntry], limit: int = MAX_PER_FILE) -> List[ConfigEntry]:
+    """محدود کردن تعداد کانفیگ‌های یک فایل (ورودی باید از قبل مرتب شده باشد)."""
+    return entries[:limit] if limit and limit > 0 else entries
+
+def diversify_by_country(entries: List[ConfigEntry], limit: int,
+                         countries: Optional[List[str]] = None,
+                         per_country: int = 0) -> List[ConfigEntry]:
+    """انتخاب متوازن کانفیگ از کشورهای محبوب به‌جای تمرکز روی یک کشور (مثلاً آمریکا).
+
+    کانفیگ‌ها به‌صورت round-robin بین کشورهای موجود در POPULAR_COUNTRIES برداشته
+    می‌شوند تا خروجی متنوع بماند. ورودی باید از قبل بر اساس کیفیت مرتب شده باشد.
+    """
+    countries = countries or POPULAR_COUNTRIES
+
+    # گروه‌بندی بر اساس کد کشور (بدون تغییر ترتیب کیفیت درون هر گروه)
+    buckets: Dict[str, List[ConfigEntry]] = {}
+    for e in entries:
+        cc = (e.country_code or "").upper() or "??"
+        buckets.setdefault(cc, []).append(e)
+
+    # ترتیب کشورها: اول محبوب‌ها به‌ترتیب لیست، سپس بقیه (و در آخر نامشخص‌ها)
+    ordered = [cc for cc in countries if cc in buckets]
+    rest = [cc for cc in buckets if cc not in countries and cc != "??"]
+    rest.sort(key=lambda cc: -(buckets[cc][0].quality_score or -9999))
+    ordered += rest
+    if "??" in buckets:
+        ordered.append("??")
+
+    result: List[ConfigEntry] = []
+    idx: Dict[str, int] = {cc: 0 for cc in ordered}
+    counts: Dict[str, int] = {cc: 0 for cc in ordered}
+
+    # چند دور می‌زنیم تا سقف پر شود
+    progress = True
+    while len(result) < limit and progress:
+        progress = False
+        for cc in ordered:
+            if len(result) >= limit:
+                break
+            if per_country and counts[cc] >= per_country:
+                continue
+            i = idx[cc]
+            if i < len(buckets[cc]):
+                result.append(buckets[cc][i])
+                idx[cc] = i + 1
+                counts[cc] += 1
+                progress = True
+
+    return result
+
 def rename_config(entry: ConfigEntry, index: int) -> str:
     """جایگزینی نام نمایشی کانفیگ با نام استاندارد و یکتا."""
     name = build_display_name(entry, index)
@@ -624,10 +691,16 @@ async def run() -> None:
     def renamed(entries: List[ConfigEntry]) -> List[str]:
         return [rename_config(e, i) for i, e in enumerate(entries)]
 
-    vless_out = renamed(vless)
-    vmess_out = renamed(vmess)
-    trojan_out = renamed(trojan)
-    ss_out = renamed(ss)
+    # محدودسازی هر فایل پروتکل به MAX_PER_FILE (فایل «همه» محدود نمی‌شود)
+    vless_capped = cap_entries(vless)
+    vmess_capped = cap_entries(vmess)
+    trojan_capped = cap_entries(trojan)
+    ss_capped = cap_entries(ss)
+
+    vless_out = renamed(vless_capped)
+    vmess_out = renamed(vmess_capped)
+    trojan_out = renamed(trojan_capped)
+    ss_out = renamed(ss_capped)
 
     # ====== نوشتن فایل‌های خروجی ======
     def write_file(name: str, lines: List[str], header: str = "") -> None:
@@ -646,18 +719,26 @@ async def run() -> None:
     hdr_hiddify = subscription_header(f"{CHANNEL_NAME} | Hiddify Optimized")
     hdr_frag = subscription_header(f"{CHANNEL_NAME} | Fragment (Instagram/YouTube)", "https://www.instagram.com")
 
+    # Hiddify: کانفیگ‌های متنوع از کشورهای محبوب (نه فقط آمریکا)
+    hiddify_entries = diversify_by_country(
+        vless, HIDDIFY_LIMIT, POPULAR_COUNTRIES, HIDDIFY_PER_COUNTRY
+    )
+    hiddify_out = renamed(hiddify_entries)
+
     write_file("prx11-vless.txt", vless_out, hdr_vless)
     write_file("prx11-vmess.txt", vmess_out, hdr_vmess)
     write_file("prx11-trojan.txt", trojan_out, hdr_trojan)
     write_file("prx11-ss.txt", ss_out, hdr_ss)
 
-    # Hiddify: ۱۰۰ کانفیگ برتر VLESS (قبلاً رتبه‌بندی شده‌اند)
-    write_file("prx11-hiddify.txt", vless_out[:100], hdr_hiddify)
+    write_file("prx11-hiddify.txt", hiddify_out, hdr_hiddify)
 
     # Fragment فقط یک فایل تنظیمات تست است؛ نباید به‌عنوان subscription پروکسی استفاده شود
     write_file("prx11-insta-youto.txt", frag_raw if (frag_raw := [e.raw for e in frag]) else [], hdr_frag)
 
-    all_out = list(dict.fromkeys(vless_out + vmess_out + trojan_out + ss_out))
+    # فایل «همه» بدون محدودیت است، اما تکراری‌ها حذف می‌شوند
+    all_out = list(dict.fromkeys(
+        [e.raw for e in vless] + [e.raw for e in vmess] + [e.raw for e in trojan] + [e.raw for e in ss]
+    ))
     write_file("prx11-all.txt", all_out, hdr_all)
 
     # ====== آمار ======
@@ -689,6 +770,11 @@ async def run() -> None:
         key=lambda x: x[1],
     )[:10]
 
+    hiddify_countries: Dict[str, int] = {}
+    for e in hiddify_entries:
+        cc = e.country_code or "??"
+        hiddify_countries[cc] = hiddify_countries.get(cc, 0) + 1
+
     known_country = sum(v for k, v in country_stats.items() if k != "??")
     log_data = {
         "updated_at_iran": iran_str,
@@ -699,14 +785,20 @@ async def run() -> None:
         "removed_duplicates": stats["initial"] - stats["invalid"] - stats["fake"] - stats["after_dedup"],
         "geoip_known": known_country,
         "geoip_unknown": country_stats.get("??", 0),
+        "limits": {
+            "max_per_file": MAX_PER_FILE,
+            "hiddify_limit": HIDDIFY_LIMIT,
+            "hiddify_per_country": HIDDIFY_PER_COUNTRY,
+        },
         "outputs": {
             "vless": len(vless_out),
             "vmess": len(vmess_out),
             "trojan": len(trojan_out),
             "ss": len(ss_out),
-            "hiddify": len(vless_out[:100]),
+            "hiddify": len(hiddify_out),
             "all": len(all_out),
         },
+        "hiddify_country_distribution": dict(sorted(hiddify_countries.items(), key=lambda x: -x[1])),
         "country_distribution": dict(sorted(country_stats.items(), key=lambda x: -x[1])),
         "latency_summary_ms": latency_summary,
         "top10_fastest_countries": top_fast,
