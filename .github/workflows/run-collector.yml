@@ -5,25 +5,32 @@ on:
     - cron: '0 */6 * * *'   # هر ۶ ساعت یکبار اجرا می‌شود
   workflow_dispatch:        # امکان اجرای دستی
 
+permissions:
+  contents: write
+
+concurrency:
+  group: collector
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
         persist-credentials: true
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
+        cache: pip
 
     - name: Install dependencies
-      run: |
-        pip install aiohttp
+      run: pip install -r requirements.txt
 
     - name: Run collector
       run: python main.py
@@ -33,6 +40,13 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add output/
-        # اگر تغییری وجود داشته باشد، commit می‌کند
         git diff --staged --quiet || git commit -m "Auto-update configs $(date '+%Y-%m-%d %H:%M:%S')"
         git push
+
+    - name: Upload report artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: prx11-report
+        path: output/PRX11-LOGGER.json
+        retention-days: 14
