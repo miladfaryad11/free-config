@@ -1,9 +1,9 @@
-#profile-title: base64:8J+UpSBGcmFnbWVudCDwn5Sl
-#profile-update-interval: 24
+#profile-title: base64:UFJYMTEgfCBGcmFnbWVudCAoSW5zdGFncmFtL1lvdVR1YmUp
+#profile-update-interval: 6
 #subscription-userinfo: upload=0; download=0; total=10737418240000000; expire=2546249531
 #support-url: https://t.me/proxystore11
 #profile-web-page-url: https://proxystore11.news
-#connection-test-url: https://instagram.com
+#connection-test-url: https://www.instagram.com
 #remote-dns-address: https://sky.rethinkdns.com/dns-query
 
 direct://?fragment=tlshello,10-100,100-200#Fragment1
