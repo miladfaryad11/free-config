@@ -48,6 +48,41 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 )
 
+# ==========================  نام‌گذاری کانفیگ‌ها  ==========================
+# نام کانال/برند شما؛ در نام نمایشی هر کانفیگ و در عنوان subscription استفاده می‌شود
+CHANNEL_NAME = "PRX11 | @proxystore11"
+
+# قالب نام نمایشی کانفیگ. می‌توانید ترتیب و متن را آزادانه تغییر دهید.
+# متغیرهای قابل استفاده:
+#   {channel}   نام کانال (CHANNEL_NAME)
+#   {flag}      پرچم کشور به‌صورت ایموجی (مثلاً 🇩🇪)
+#   {country}   کد دو حرفی کشور (مثلاً DE)
+#   {protocol}  نام پروتکل با حروف بزرگ (VLESS / VMESS / TROJAN / SS)
+#   {latency}   تأخیر به میلی‌ثانیه (اگر نامشخص باشد حذف می‌شود)
+#   {host}      میزبان سرور
+#   {port}      پورت سرور
+#   {index}     شماره‌ی ترتیب کانفیگ
+NAME_TEMPLATE = "{channel} {flag} {protocol} {latency}"
+
+# نمایش تأخیر در نام (اگر False باشد {latency} همیشه خالی می‌شود)
+SHOW_LATENCY_IN_NAME = True
+
+# پرچم ایموجی کشورها بر اساس کد دو حرفی
+COUNTRY_FLAGS: Dict[str, str] = {
+    "DE": "🇩🇪", "FI": "🇫🇮", "NL": "🇳🇱", "SE": "🇸🇪", "CH": "🇨🇭",
+    "AT": "🇦🇹", "US": "🇺🇸", "CA": "🇨🇦", "FR": "🇫🇷", "GB": "🇬🇧",
+    "SG": "🇸🇬", "AU": "🇦🇺", "PL": "🇵🇱", "RO": "🇷🇴", "TR": "🇹🇷",
+    "IR": "🇮🇷", "RU": "🇷🇺", "AE": "🇦🇪", "JP": "🇯🇵", "HK": "🇭🇰",
+    "IN": "🇮🇳", "IT": "🇮🇹", "ES": "🇪🇸", "EE": "🇪🇪", "BG": "🇧🇬",
+    "LT": "🇱🇹", "LV": "🇱🇻", "CZ": "🇨🇿", "SK": "🇸🇰", "HU": "🇭🇺",
+    "NO": "🇳🇴", "DK": "🇩🇰", "IE": "🇮🇪", "BE": "🇧🇪", "LU": "🇱🇺",
+    "PT": "🇵🇹", "GR": "🇬🇷", "UA": "🇺🇦", "KZ": "🇰🇿", "MD": "🇲🇩",
+    "RS": "🇷🇸", "HR": "🇭🇷", "SI": "🇸🇮", "IL": "🇮🇱", "KR": "🇰🇷",
+    "TW": "🇹🇼", "VN": "🇻🇳", "TH": "🇹🇭", "MY": "🇲🇾", "ID": "🇮🇩",
+    "BR": "🇧🇷", "AR": "🇦🇷", "MX": "🇲🇽", "ZA": "🇿🇦", "NZ": "🇳🇿",
+}
+DEFAULT_FLAG = "🏳️"
+
 COUNTRY_PRIORITY: Dict[str, int] = {
     "DE": 9, "FI": 9, "NL": 9, "SE": 8, "CH": 8,
     "AT": 7, "US": 7, "CA": 7, "FR": 6, "GB": 6,
@@ -98,6 +133,47 @@ def now_iran() -> str:
 
 # ==========================  مدل داده  ==========================
 
+def country_flag(country_code: Optional[str]) -> str:
+    """تبدیل کد کشور به پرچم ایموجی (با پشتیبانی از هر کد دو حرفی)."""
+    cc = (country_code or "").strip().upper()
+    if not cc:
+        return DEFAULT_FLAG
+    if cc in COUNTRY_FLAGS:
+        return COUNTRY_FLAGS[cc]
+    if len(cc) == 2 and cc.isalpha():
+        # تبدیل استاندارد دو حرفی به ایموجی پرچم
+        return chr(0x1F1E6 + ord(cc[0]) - 65) + chr(0x1F1E6 + ord(cc[1]) - 65)
+    return DEFAULT_FLAG
+
+def build_display_name(entry: "ConfigEntry", index: int = 0) -> str:
+    """ساخت نام نمایشی از NAME_TEMPLATE و حذف بخش‌های خالی."""
+    latency = ""
+    if SHOW_LATENCY_IN_NAME and entry.latency_ms is not None:
+        latency = f"{int(entry.latency_ms)}ms"
+
+    fields = {
+        "channel": CHANNEL_NAME,
+        "flag": country_flag(entry.country_code),
+        "country": (entry.country_code or "XX").upper(),
+        "protocol": entry.proto.upper(),
+        "latency": latency,
+        "host": entry.host or "",
+        "port": str(entry.port or ""),
+        "index": str(index),
+    }
+
+    try:
+        name = NAME_TEMPLATE.format(**fields)
+    except KeyError as e:
+        print(f"⚠️ متغیر ناشناخته در NAME_TEMPLATE: {e} — از قالب پیش‌فرض استفاده می‌شود.")
+        name = f"{CHANNEL_NAME} {fields['flag']} {fields['protocol']} {latency}"
+
+    # پاک‌سازی: حذف بخش‌های خالی و فاصله‌های تکراری
+    parts = [p.strip() for p in name.split("|")]
+    parts = [p for p in parts if p]
+    cleaned = " | ".join(parts) if len(parts) > 1 else (parts[0] if parts else name)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
 @dataclass
 class ConfigEntry:
     proto: str
@@ -119,14 +195,8 @@ class ConfigEntry:
 
     @property
     def display_name(self) -> str:
-        """نام خوانا و یکتا برای نمایش در کلاینت‌ها."""
-        cc = self.country_code or "XX"
-        host = self.host or "unknown"
-        port = self.port or 0
-        tag = f"{self.proto.upper()}-{cc}"
-        if self.latency_ms is not None:
-            tag += f"-{int(self.latency_ms)}ms"
-        return f"{tag} | {host}:{port}"
+        """نام نمایشی کانفیگ بر اساس NAME_TEMPLATE (کانال + پرچم + پروتکل + تأخیر)."""
+        return build_display_name(self)
 
 # ==========================  توابع تجزیه  ==========================
 
@@ -489,7 +559,7 @@ def sort_by_quality(entries: List[ConfigEntry]) -> List[ConfigEntry]:
 
 def rename_config(entry: ConfigEntry, index: int) -> str:
     """جایگزینی نام نمایشی کانفیگ با نام استاندارد و یکتا."""
-    name = entry.display_name
+    name = build_display_name(entry, index)
     raw = entry.raw
 
     if entry.proto in ("vless", "trojan"):
@@ -568,13 +638,13 @@ async def run() -> None:
             f.write(content)
         print(f"📄 نوشته شد: {path} ({len(lines)} کانفیگ)")
 
-    hdr_all = subscription_header("PRX11 | All Configs")
-    hdr_vless = subscription_header("PRX11 | VLESS")
-    hdr_vmess = subscription_header("PRX11 | VMESS")
-    hdr_trojan = subscription_header("PRX11 | Trojan")
-    hdr_ss = subscription_header("PRX11 | Shadowsocks")
-    hdr_hiddify = subscription_header("PRX11 | Hiddify Optimized")
-    hdr_frag = subscription_header("PRX11 | Fragment (Instagram/YouTube)", "https://www.instagram.com")
+    hdr_all = subscription_header(f"{CHANNEL_NAME} | All Configs")
+    hdr_vless = subscription_header(f"{CHANNEL_NAME} | VLESS")
+    hdr_vmess = subscription_header(f"{CHANNEL_NAME} | VMESS")
+    hdr_trojan = subscription_header(f"{CHANNEL_NAME} | Trojan")
+    hdr_ss = subscription_header(f"{CHANNEL_NAME} | Shadowsocks")
+    hdr_hiddify = subscription_header(f"{CHANNEL_NAME} | Hiddify Optimized")
+    hdr_frag = subscription_header(f"{CHANNEL_NAME} | Fragment (Instagram/YouTube)", "https://www.instagram.com")
 
     write_file("prx11-vless.txt", vless_out, hdr_vless)
     write_file("prx11-vmess.txt", vmess_out, hdr_vmess)
