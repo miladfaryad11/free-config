@@ -1,4 +1,4 @@
-#profile-title: base64:UFJYMTEgfCBGcmFnbWVudCAoSW5zdGFncmFtL1lvdVR1YmUp
+#profile-title: base64:UFJYMTEgfCBAcHJveHlzdG9yZTExIHwgRnJhZ21lbnQgKEluc3RhZ3JhbS9Zb3VUdWJlKQ==
 #profile-update-interval: 6
 #subscription-userinfo: upload=0; download=0; total=10737418240000000; expire=2546249531
 #support-url: https://t.me/proxystore11
