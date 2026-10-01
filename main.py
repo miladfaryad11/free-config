@@ -1,36 +1,62 @@
 #!/usr/bin/env python3
+"""
+PRX11 - Free Config Collector
+جمع‌آوری، پالایش، اعتبارسنجی و انتشار خودکار کانفیگ‌های پروکسی.
+"""
 import asyncio
 import aiohttp
 import base64
 import json
 import os
 import re
+import socket
 import statistics
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 # ==========================  تنظیمات پایه  ==========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOURCES_FILE = os.path.join(BASE_DIR, "sources.json")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output/subscriptions")
-REPORT_FILE = os.path.join(BASE_DIR, "output/PRX11-REPORT.json")
 LOGGER_FILE = os.path.join(BASE_DIR, "output/PRX11-LOGGER.json")
 AUTO_UPDATE_FILE = os.path.join(BASE_DIR, "output/AUTO_UPDATE.txt")
 
 ENABLE_GEOIP = True
 ENABLE_LATENCY = True
-MAX_ENRICH_GEOIP = 700
-MAX_ENRICH_LATENCY = 500
-GEOIP_URL = "http://ip-api.com/json/{host}?fields=status,country,countryCode"
+MAX_ENRICH_GEOIP = 6000
+MAX_ENRICH_LATENCY = 3000
+GEOIP_CONCURRENCY = 12
+LATENCY_CONCURRENCY = 60
+FETCH_CONCURRENCY = 10
+FETCH_RETRIES = 3
+LATENCY_TIMEOUT = 4.0
+DNS_TIMEOUT = 3.0
+
+# منابع GeoIP: روی IP کار می‌کنند (نام دامنه ابتدا به‌صورت محلی resolve می‌شود)
+# چند سرویس به‌صورت fallback تا نرخ‌محدودیت یک سرویس مشکل ایجاد نکند
+GEOIP_PROVIDERS = [
+    ("https://ipinfo.io/{ip}/json", ("country",)),
+    ("https://api.ip2location.io/?ip={ip}", ("country_code",)),
+    ("https://api.country.is/{ip}", ("country",)),
+]
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+)
 
 COUNTRY_PRIORITY: Dict[str, int] = {
     "DE": 9, "FI": 9, "NL": 9, "SE": 8, "CH": 8,
     "AT": 7, "US": 7, "CA": 7, "FR": 6, "GB": 6,
-    "SG": 6, "AU": 6, "": 0,
+    "SG": 6, "AU": 6, "PL": 5, "RO": 5, "TR": 4, "IR": 4,
 }
+
+# پورت‌های غیراستاندارد/مشکوک که پروکسی روی آن‌ها معمولاً کار نمی‌کند
+VALID_PORTS = {80, 443, 2052, 2053, 2082, 2083, 2086, 2087,
+               2095, 2096, 8080, 8443, 8880}
 
 # ==========================  توابع کمکی  ==========================
 
@@ -56,19 +82,19 @@ def load_sources() -> Dict[str, List[str]]:
         return default
 
 def ensure_dirs() -> None:
-    """ساخت پوشه‌های خروجی با مدیریت خطا و بررسی وجود فایل همنام."""
+    """ساخت پوشه‌های خروجی."""
     try:
         if os.path.isfile(OUTPUT_DIR):
             os.remove(OUTPUT_DIR)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-        parent = os.path.dirname(REPORT_FILE)
-        if os.path.isfile(parent):
-            os.remove(parent)
-        os.makedirs(parent, exist_ok=True)
     except Exception as e:
         print(f"⚠️ خطا در ایجاد پوشه‌ها: {e}")
         raise
+
+def now_iran() -> str:
+    """زمان فعلی به وقت ایران (UTC+3:30)."""
+    iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
+    return datetime.fromtimestamp(iran_ts).strftime("%Y-%m-%d %H:%M:%S")
 
 # ==========================  مدل داده  ==========================
 
@@ -84,84 +110,116 @@ class ConfigEntry:
     latency_ms: Optional[float] = None
     quality_score: Optional[float] = None
 
+    @property
+    def uid(self) -> str:
+        """کلید یکتای کانفیگ: پروتکل + میزبان + پورت + هویت."""
+        host = (self.host or "").lower().strip()
+        port = self.port or 0
+        return f"{self.proto}|{host}|{port}|{self.identity}"
+
+    @property
+    def display_name(self) -> str:
+        """نام خوانا و یکتا برای نمایش در کلاینت‌ها."""
+        cc = self.country_code or "XX"
+        host = self.host or "unknown"
+        port = self.port or 0
+        tag = f"{self.proto.upper()}-{cc}"
+        if self.latency_ms is not None:
+            tag += f"-{int(self.latency_ms)}ms"
+        return f"{tag} | {host}:{port}"
+
 # ==========================  توابع تجزیه  ==========================
 
-def parse_vless(line: str) -> ConfigEntry:
-    identity, host, port = None, None, None
+def split_host_port(value: str) -> Tuple[Optional[str], Optional[int]]:
+    """جداسازی میزبان و پورت از رشته‌ی host:port (پشتیبانی از IPv6)."""
+    if not value:
+        return None, None
+    value = value.strip()
+    if value.startswith("["):
+        end = value.find("]")
+        if end != -1:
+            host = value[1:end]
+            rest = value[end + 1:]
+            if rest.startswith(":") and rest[1:].isdigit():
+                return host, int(rest[1:])
+            return host, None
+    if ":" in value:
+        host, p = value.rsplit(":", 1)
+        return host.strip(), int(p) if p.isdigit() else None
+    return value, None
+
+def parse_vless(line: str) -> Optional[ConfigEntry]:
     try:
         no_scheme = line.split("://", 1)[1]
         userinfo, rest = no_scheme.split("@", 1)
-        identity = userinfo.split(":", 1)[0]
-        hp = rest.split("?", 1)[0]
-        if ":" in hp:
-            host, p = hp.rsplit(":", 1)
-            port = int(p)
-        else:
-            host = hp
+        identity = unquote(userinfo.split(":", 1)[0]).strip()
+        host, port = split_host_port(rest.split("?", 1)[0].split("#", 1)[0])
+        if not identity or not host:
+            return None
+        return ConfigEntry("vless", line, identity, host, port)
     except Exception:
-        pass
-    return ConfigEntry("vless", line, identity or line, host, port)
+        return None
 
-def parse_vmess(line: str) -> ConfigEntry:
-    identity, host, port = None, None, None
+def parse_vmess(line: str) -> Optional[ConfigEntry]:
     try:
         raw = line.split("://", 1)[1].strip()
         pad = len(raw) % 4
         if pad:
             raw += "=" * (4 - pad)
-        decoded = base64.b64decode(raw).decode("utf-8", errors="ignore")
+        decoded = base64.b64decode(raw, validate=False).decode("utf-8", errors="ignore")
         obj = json.loads(decoded)
-        identity = (obj.get("id") or obj.get("uuid") or "").strip()
-        host = (obj.get("host") or obj.get("add") or "").strip() or None
+        identity = str(obj.get("id") or obj.get("uuid") or "").strip()
+        host = str(obj.get("add") or obj.get("host") or "").strip() or None
         p = obj.get("port")
-        if isinstance(p, str):
-            try:
-                port = int(p)
-            except Exception:
-                port = None
-        elif isinstance(p, int):
-            port = p
+        port = int(p) if str(p).isdigit() else None
+        if not identity or not host:
+            return None
+        return ConfigEntry("vmess", line, identity, host, port)
     except Exception:
-        pass
-    return ConfigEntry("vmess", line, identity or line, host, port)
+        return None
 
-def parse_trojan(line: str) -> ConfigEntry:
-    identity, host, port = None, None, None
+def parse_trojan(line: str) -> Optional[ConfigEntry]:
     try:
         no_scheme = line.split("://", 1)[1]
         userinfo, rest = no_scheme.split("@", 1)
-        identity = userinfo.strip()
-        hp = rest.split("?", 1)[0]
-        if ":" in hp:
-            host, p = hp.rsplit(":", 1)
-            port = int(p)
-        else:
-            host = hp
+        identity = unquote(userinfo.split(":", 1)[0]).strip()
+        host, port = split_host_port(rest.split("?", 1)[0].split("#", 1)[0])
+        if not identity or not host:
+            return None
+        return ConfigEntry("trojan", line, identity, host, port)
     except Exception:
-        pass
-    return ConfigEntry("trojan", line, identity or line, host, port)
+        return None
 
-def parse_ss(line: str) -> ConfigEntry:
-    identity, host, port = None, None, None
+def parse_ss(line: str) -> Optional[ConfigEntry]:
+    """پشتیبانی از هر دو قالب ss://base64@host:port و ss://base64."""
     try:
         body = line.split("://", 1)[1]
         tmp = body.split("#", 1)[0].split("?", 1)[0]
+
         if "@" in tmp:
             userinfo, hp = tmp.split("@", 1)
             identity = unquote(userinfo)
-            if ":" in hp:
-                host, p = hp.rsplit(":", 1)
-                port = int(p)
-            else:
-                host = hp
         else:
-            identity = unquote(tmp)
-    except Exception:
-        pass
-    return ConfigEntry("ss", line, identity or line, host, port)
+            pad = len(tmp) % 4
+            if pad:
+                tmp_padded = tmp + "=" * (4 - pad)
+            else:
+                tmp_padded = tmp
+            try:
+                decoded = base64.b64decode(tmp_padded, validate=False).decode("utf-8", errors="ignore")
+            except Exception:
+                return None
+            if "@" not in decoded:
+                return None
+            userinfo, hp = decoded.split("@", 1)
+            identity = userinfo
 
-def parse_frag(line: str) -> ConfigEntry:
-    return ConfigEntry("frag", line, line)
+        host, port = split_host_port(hp)
+        if not host or not identity:
+            return None
+        return ConfigEntry("ss", line, identity, host, port)
+    except Exception:
+        return None
 
 def parse_config(proto: str, line: str) -> Optional[ConfigEntry]:
     l = line.strip().lower()
@@ -176,28 +234,46 @@ def parse_config(proto: str, line: str) -> Optional[ConfigEntry]:
     if proto == "ss" or l.startswith("ss://"):
         return parse_ss(line.strip())
     if proto == "frag":
-        return parse_frag(line.strip())
-    return ConfigEntry(proto, line.strip(), line.strip())
+        return ConfigEntry("frag", line.strip(), line.strip())
+    return None
 
-# ==========================  فیلترها  ==========================
+# ==========================  فیلترها و اعتبارسنجی  ==========================
 
 FAKE_PATTERNS = [
-    r"free.*vpn", r"fake", r"test", r"example",
-    r"temp", r"speedtest", r"xxxx",
+    r"\bfree\b.*\bvpn\b", r"\bfake\b", r"\btest\b", r"\bexample\b",
+    r"\btemp\b", r"\bspeedtest\b", r"x{4,}", r"\bnull\b", r"\bunknown\b",
 ]
 
 def is_fake(entry: ConfigEntry) -> bool:
     txt = entry.raw.lower()
-    for p in FAKE_PATTERNS:
-        if re.search(p, txt):
-            return True
-    return False
+    return any(re.search(p, txt) for p in FAKE_PATTERNS)
+
+def is_valid_entry(e: ConfigEntry) -> bool:
+    """اعتبارسنجی ساختاری: میزبان، پورت و هویت باید معتبر باشند."""
+    if not e.host or not e.port:
+        return False
+    if not (1 <= e.port <= 65535):
+        return False
+    if not e.identity:
+        return False
+    host = e.host.strip()
+    if len(host) < 4 or " " in host or host.startswith(".") or host.endswith("."):
+        return False
+    # میزبان باید دامنه یا IP معتبر باشد
+    if not re.match(r"^[A-Za-z0-9._\-:\[\]]+$", host):
+        return False
+    if host.replace(".", "").isdigit():
+        parts = host.split(".")
+        if len(parts) != 4 or any(not (0 <= int(p) <= 255) for p in parts):
+            return False
+    return True
 
 def dedupe_entries(entries: List[ConfigEntry]) -> List[ConfigEntry]:
+    """حذف تکراری بر اساس کلید یکتا (پروتکل + میزبان + پورت + هویت)."""
     seen = set()
     out: List[ConfigEntry] = []
     for e in entries:
-        key = f"{e.proto}|{e.identity}"
+        key = e.uid
         if key not in seen:
             seen.add(key)
             out.append(e)
@@ -205,103 +281,191 @@ def dedupe_entries(entries: List[ConfigEntry]) -> List[ConfigEntry]:
 
 # ==========================  غنی‌سازی (GeoIP & Latency)  ==========================
 
-async def geoip_lookup(host: str, session: aiohttp.ClientSession) -> Tuple[Optional[str], Optional[str]]:
+async def resolve_host(host: str) -> Optional[str]:
+    """تبدیل نام دامنه به IP به‌صورت محلی (بدون وابستگی به سرویس GeoIP)."""
     if not host:
-        return None, None
+        return None
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
+        return host
+    loop = asyncio.get_running_loop()
     try:
-        async with session.get(GEOIP_URL.format(host=host), timeout=5) as r:
-            data = await r.json(content_type=None)
-            if data.get("status") == "success":
-                return data.get("country"), data.get("countryCode")
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, family=socket.AF_INET),
+            timeout=DNS_TIMEOUT,
+        )
+        if infos:
+            return infos[0][4][0]
     except Exception:
-        pass
-    return None, None
+        return None
+    return None
 
-async def measure_latency(entry: ConfigEntry, session: aiohttp.ClientSession) -> Optional[float]:
-    if not entry.host:
+async def geoip_lookup(ip: str, session: aiohttp.ClientSession,
+                       sem: asyncio.Semaphore) -> Optional[str]:
+    """کد کشور را برای یک IP از چند سرویس GeoIP با fallback پیدا می‌کند."""
+    if not ip:
         return None
-    port = entry.port or 443
-    scheme = "https" if port == 443 else "http"
-    url = f"{scheme}://{entry.host}"
-    start = time.monotonic()
-    try:
-        async with session.get(url, timeout=3) as r:
-            await r.read()
-        return round((time.monotonic() - start) * 1000, 1)
-    except Exception:
+    async with sem:
+        for template, keys in GEOIP_PROVIDERS:
+            try:
+                async with session.get(template.format(ip=ip),
+                                       timeout=aiohttp.ClientTimeout(total=6)) as r:
+                    if r.status != 200:
+                        continue
+                    data = await r.json(content_type=None)
+                    cc = ""
+                    for k in keys:
+                        cc = str(data.get(k) or "").strip().upper()
+                        if cc:
+                            break
+                    if len(cc) == 2 and cc.isalpha():
+                        return cc
+            except Exception:
+                continue
+    return None
+
+async def measure_latency(entry: ConfigEntry, sem: asyncio.Semaphore) -> Optional[float]:
+    """تست واقعی اتصال TCP + TLS handshake با SNI صحیح."""
+    if not entry.host or not entry.port:
         return None
+    async with sem:
+        start = time.monotonic()
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    entry.host, entry.port,
+                    ssl=True, server_hostname=entry.host,
+                ),
+                timeout=LATENCY_TIMEOUT,
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return round((time.monotonic() - start) * 1000, 1)
+        except Exception:
+            return None
+
+async def resolve_many(entries: List[ConfigEntry], limit: int) -> Dict[str, Optional[str]]:
+    """resolve دسته‌ای میزبان‌ها به IP با کش؛ میزبان‌های حل‌شده اولویت GeoIP می‌گیرند."""
+    cache: Dict[str, Optional[str]] = {}
+    sem = asyncio.Semaphore(80)
+
+    async def one(e: ConfigEntry) -> None:
+        h = (e.host or "").lower()
+        if not h or h in cache:
+            return
+        async with sem:
+            cache[h] = await resolve_host(h)
+
+    targets = entries[:limit]
+    await asyncio.gather(*[one(e) for e in targets])
+    return cache
 
 async def enrich_entries(entries: List[ConfigEntry], session: aiohttp.ClientSession) -> None:
-    geo_targets = entries[:MAX_ENRICH_GEOIP] if ENABLE_GEOIP else []
-    lat_targets = entries[:MAX_ENRICH_LATENCY] if ENABLE_LATENCY else []
+    geo_sem = asyncio.Semaphore(GEOIP_CONCURRENCY)
+    lat_sem = asyncio.Semaphore(LATENCY_CONCURRENCY)
+    geo_cache: Dict[str, Optional[str]] = {}
+
+    # ابتدا میزبان‌ها را resolve می‌کنیم تا فقط کانفیگ‌های قابل‌دسترس GeoIP بگیرند
+    dns_cache: Dict[str, Optional[str]] = {}
+    if ENABLE_GEOIP:
+        dns_cache = await resolve_many(entries, MAX_ENRICH_GEOIP)
+
+    async def lookup_cached(ip: Optional[str]) -> Optional[str]:
+        if not ip:
+            return None
+        if ip not in geo_cache:
+            geo_cache[ip] = await geoip_lookup(ip, session, geo_sem)
+        return geo_cache[ip]
 
     async def do_geo(e: ConfigEntry) -> None:
-        c, cc = await geoip_lookup(e.host or "", session)
-        if c:
-            e.country = c
+        ip = dns_cache.get((e.host or "").lower())
+        cc = await lookup_cached(ip)
         if cc:
             e.country_code = cc
+            e.country = cc
 
     async def do_lat(e: ConfigEntry) -> None:
-        ms = await measure_latency(e, session)
+        ms = await measure_latency(e, lat_sem)
         if ms is not None:
             e.latency_ms = ms
 
     tasks: List[asyncio.Task] = []
-    for e in geo_targets:
-        tasks.append(asyncio.create_task(do_geo(e)))
-    for e in lat_targets:
-        tasks.append(asyncio.create_task(do_lat(e)))
+    if ENABLE_GEOIP:
+        for e in entries[:MAX_ENRICH_GEOIP]:
+            tasks.append(asyncio.create_task(do_geo(e)))
+    if ENABLE_LATENCY:
+        for e in entries[:MAX_ENRICH_LATENCY]:
+            tasks.append(asyncio.create_task(do_lat(e)))
 
     if tasks:
         await asyncio.gather(*tasks)
 
 # ==========================  دریافت داده از اینترنت  ==========================
 
-async def fetch_url(url: str, session: aiohttp.ClientSession) -> List[str]:
-    try:
-        async with session.get(url, timeout=25) as r:
-            text = await r.text()
-            return [line.strip() for line in text.splitlines() if line.strip()]
-    except Exception as e:
-        print(f"⚠️ خطا در دریافت {url}: {e}")
-        return []
+async def fetch_url(url: str, session: aiohttp.ClientSession,
+                    sem: asyncio.Semaphore) -> List[str]:
+    """دریافت یک منبع با retry و backoff نمایی."""
+    async with sem:
+        for attempt in range(FETCH_RETRIES):
+            try:
+                async with session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=25),
+                    headers={"User-Agent": USER_AGENT},
+                ) as r:
+                    if r.status != 200:
+                        raise RuntimeError(f"HTTP {r.status}")
+                    text = await r.text()
+                    return [line.strip() for line in text.splitlines() if line.strip()]
+            except Exception as e:
+                if attempt == FETCH_RETRIES - 1:
+                    print(f"⚠️ خطا در دریافت {url}: {e}")
+                else:
+                    await asyncio.sleep(2 ** attempt)
+    return []
 
-async def fetch_all(sources: Dict[str, List[str]]) -> Tuple[Dict[str, List[ConfigEntry]], int, int]:
+async def fetch_all(sources: Dict[str, List[str]]) -> Tuple[Dict[str, List[ConfigEntry]], Dict[str, int]]:
+    stats = {"initial": 0, "invalid": 0, "fake": 0, "after_dedup": 0}
+
     async with aiohttp.ClientSession() as session:
+        sem = asyncio.Semaphore(FETCH_CONCURRENCY)
         tasks: List[Tuple[str, asyncio.Task]] = []
         for proto, urls in sources.items():
             for u in urls:
-                tasks.append((proto, asyncio.create_task(fetch_url(u, session))))
+                tasks.append((proto, asyncio.create_task(fetch_url(u, session, sem))))
 
         raw_lines: Dict[str, List[str]] = {k: [] for k in sources.keys()}
-
         for proto, task in tasks:
             try:
-                lines = await task
-                raw_lines[proto].extend(lines)
+                raw_lines[proto].extend(await task)
             except Exception:
                 pass
 
         if "frag" in raw_lines:
-            raw_lines["frag"] = [
-                l for l in raw_lines["frag"]
-                if not l.strip().startswith("#")
-            ]
+            raw_lines["frag"] = [l for l in raw_lines["frag"] if not l.strip().startswith("#")]
 
         entries: List[ConfigEntry] = []
         for proto, lines in raw_lines.items():
             for line in lines:
+                if not line or line.startswith("#"):
+                    continue
+                stats["initial"] += 1
                 e = parse_config(proto, line)
                 if not e:
+                    stats["invalid"] += 1
+                    continue
+                if proto != "frag" and not is_valid_entry(e):
+                    stats["invalid"] += 1
                     continue
                 if proto != "frag" and is_fake(e):
+                    stats["fake"] += 1
                     continue
                 entries.append(e)
 
-        initial_count = len(entries)
         entries = dedupe_entries(entries)
-        dedup_count = len(entries)
+        stats["after_dedup"] = len(entries)
 
         await enrich_entries(entries, session)
 
@@ -309,32 +473,65 @@ async def fetch_all(sources: Dict[str, List[str]]) -> Tuple[Dict[str, List[Confi
         for e in entries:
             grouped.setdefault(e.proto, []).append(e)
 
-        return grouped, initial_count, dedup_count
+        return grouped, stats
 
 # ==========================  محاسبه کیفیت و فیلوور  ==========================
 
 def compute_quality(e: ConfigEntry) -> None:
     country_weight = COUNTRY_PRIORITY.get(e.country_code or "", 0)
-    lat = e.latency_ms if e.latency_ms is not None else 350.0
+    lat = e.latency_ms if e.latency_ms is not None else 500.0
     e.quality_score = country_weight * 10 - lat * 0.3
 
-def auto_failover_hiddify(vless_entries: List[ConfigEntry]) -> List[str]:
-    scored: List[ConfigEntry] = []
-    for e in vless_entries:
+def sort_by_quality(entries: List[ConfigEntry]) -> List[ConfigEntry]:
+    for e in entries:
         compute_quality(e)
-        scored.append(e)
-    scored.sort(key=lambda x: (-(x.quality_score or -9999)))
-    top = scored[:100]
-    return [e.raw for e in top]
+    return sorted(entries, key=lambda x: -(x.quality_score if x.quality_score is not None else -9999))
 
-HIDDIFY_HEADER = """#profile-title: base64:8J+UpSBGcmFnbWVudCDwn5Sl
-#profile-update-interval: 24
-#subscription-userinfo: upload=0; download=0; total=10737418240000000; expire=2546249531
-#support-url: https://t.me/proxystore11
-#profile-web-page-url: https://proxystore11.news
-#connection-test-url: https://instagram.com
-#remote-dns-address: https://sky.rethinkdns.com/dns-query
-"""
+def rename_config(entry: ConfigEntry, index: int) -> str:
+    """جایگزینی نام نمایشی کانفیگ با نام استاندارد و یکتا."""
+    name = entry.display_name
+    raw = entry.raw
+
+    if entry.proto in ("vless", "trojan"):
+        base = raw.split("#", 1)[0]
+        return f"{base}#{name}"
+
+    if entry.proto == "ss":
+        base = raw.split("#", 1)[0]
+        return f"{base}#{name}"
+
+    if entry.proto == "vmess":
+        # در VMess نام در فیلد ps داخل JSON base64 قرار دارد
+        try:
+            body = raw.split("://", 1)[1].strip()
+            pad = len(body) % 4
+            padded = body + "=" * (4 - pad) if pad else body
+            decoded = base64.b64decode(padded, validate=False).decode("utf-8", errors="ignore")
+            obj = json.loads(decoded)
+            obj["ps"] = name
+            new_json = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+            encoded = base64.b64encode(new_json.encode("utf-8")).decode("ascii")
+            return f"vmess://{encoded}"
+        except Exception:
+            return raw
+
+    return raw
+
+# ==========================  هدرهای اشتراک  ==========================
+
+def b64_header_title(title: str) -> str:
+    return base64.b64encode(title.encode("utf-8")).decode("ascii")
+
+def subscription_header(title: str, test_url: str = "https://www.gstatic.com/generate_204") -> str:
+    return (
+        f"#profile-title: base64:{b64_header_title(title)}\n"
+        f"#profile-update-interval: 6\n"
+        f"#subscription-userinfo: upload=0; download=0; total=10737418240000000; expire=2546249531\n"
+        f"#support-url: https://t.me/proxystore11\n"
+        f"#profile-web-page-url: https://proxystore11.news\n"
+        f"#connection-test-url: {test_url}\n"
+        f"#remote-dns-address: https://sky.rethinkdns.com/dns-query\n"
+    )
 
 # ==========================  تابع اصلی  ==========================
 
@@ -346,49 +543,57 @@ async def run() -> None:
     ensure_dirs()
     print("📁 پوشه‌های خروجی آماده‌اند.")
 
-    grouped, initial_count, dedup_count = await fetch_all(sources)
+    grouped, stats = await fetch_all(sources)
 
-    vless = grouped.get("vless", [])
-    vmess = grouped.get("vmess", [])
-    trojan = grouped.get("trojan", [])
-    ss = grouped.get("ss", [])
+    vless = sort_by_quality(grouped.get("vless", []))
+    vmess = sort_by_quality(grouped.get("vmess", []))
+    trojan = sort_by_quality(grouped.get("trojan", []))
+    ss = sort_by_quality(grouped.get("ss", []))
     frag = grouped.get("frag", [])
 
-    vless_raw = [e.raw for e in vless]
-    vmess_raw = [e.raw for e in vmess]
-    trojan_raw = [e.raw for e in trojan]
-    ss_raw = [e.raw for e in ss]
-    frag_raw = [e.raw for e in frag]
+    def renamed(entries: List[ConfigEntry]) -> List[str]:
+        return [rename_config(e, i) for i, e in enumerate(entries)]
 
-    hiddify_lines = auto_failover_hiddify(vless)
-    insta_lines = frag_raw
+    vless_out = renamed(vless)
+    vmess_out = renamed(vmess)
+    trojan_out = renamed(trojan)
+    ss_out = renamed(ss)
 
     # ====== نوشتن فایل‌های خروجی ======
-    def write_file(name: str, lines: List[str]) -> None:
+    def write_file(name: str, lines: List[str], header: str = "") -> None:
         path = os.path.join(OUTPUT_DIR, name)
+        body = "\n".join(lines)
+        content = f"{header}\n{body}" if header else body
         with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-        print(f"📄 نوشته شد: {path} ({len(lines)} خط)")
+            f.write(content)
+        print(f"📄 نوشته شد: {path} ({len(lines)} کانفیگ)")
 
-    write_file("prx11-vless.txt", vless_raw)
-    write_file("prx11-vmess.txt", vmess_raw)
-    write_file("prx11-trojan.txt", trojan_raw)
-    write_file("prx11-ss.txt", ss_raw)
+    hdr_all = subscription_header("PRX11 | All Configs")
+    hdr_vless = subscription_header("PRX11 | VLESS")
+    hdr_vmess = subscription_header("PRX11 | VMESS")
+    hdr_trojan = subscription_header("PRX11 | Trojan")
+    hdr_ss = subscription_header("PRX11 | Shadowsocks")
+    hdr_hiddify = subscription_header("PRX11 | Hiddify Optimized")
+    hdr_frag = subscription_header("PRX11 | Fragment (Instagram/YouTube)", "https://www.instagram.com")
 
-    with open(os.path.join(OUTPUT_DIR, "prx11-hiddify.txt"), "w", encoding="utf-8") as f:
-        f.write(HIDDIFY_HEADER + "\n" + "\n".join(hiddify_lines))
-    with open(os.path.join(OUTPUT_DIR, "prx11-insta-youto.txt"), "w", encoding="utf-8") as f:
-        f.write(HIDDIFY_HEADER + "\n" + "\n".join(insta_lines))
+    write_file("prx11-vless.txt", vless_out, hdr_vless)
+    write_file("prx11-vmess.txt", vmess_out, hdr_vmess)
+    write_file("prx11-trojan.txt", trojan_out, hdr_trojan)
+    write_file("prx11-ss.txt", ss_out, hdr_ss)
 
-    all_raw = vless_raw + vmess_raw + trojan_raw + ss_raw
-    all_raw = list(dict.fromkeys(all_raw))
-    write_file("prx11-all.txt", all_raw)
+    # Hiddify: ۱۰۰ کانفیگ برتر VLESS (قبلاً رتبه‌بندی شده‌اند)
+    write_file("prx11-hiddify.txt", vless_out[:100], hdr_hiddify)
+
+    # Fragment فقط یک فایل تنظیمات تست است؛ نباید به‌عنوان subscription پروکسی استفاده شود
+    write_file("prx11-insta-youto.txt", frag_raw if (frag_raw := [e.raw for e in frag]) else [], hdr_frag)
+
+    all_out = list(dict.fromkeys(vless_out + vmess_out + trojan_out + ss_out))
+    write_file("prx11-all.txt", all_out, hdr_all)
 
     # ====== آمار ======
-    iran_ts = datetime.now(timezone.utc).timestamp() + 3.5 * 3600
-    iran_str = datetime.fromtimestamp(iran_ts).strftime("%Y-%m-%d %H:%M:%S")
+    iran_str = now_iran()
     with open(AUTO_UPDATE_FILE, "w", encoding="utf-8") as f:
-        f.write(f"Auto Update: {iran_str}")
+        f.write(f"Auto Update: {iran_str}\n")
 
     country_stats: Dict[str, int] = {}
     latency_map: Dict[str, List[float]] = {}
@@ -406,6 +611,7 @@ async def run() -> None:
             "avg": round(statistics.mean(vals), 1),
             "min": round(min(vals), 1),
             "max": round(max(vals), 1),
+            "samples": len(vals),
         }
 
     top_fast = sorted(
@@ -413,12 +619,25 @@ async def run() -> None:
         key=lambda x: x[1],
     )[:10]
 
+    known_country = sum(v for k, v in country_stats.items() if k != "??")
     log_data = {
         "updated_at_iran": iran_str,
-        "initial_configs": initial_count,
-        "after_dedup": dedup_count,
-        "removed_duplicates": initial_count - dedup_count,
-        "country_distribution": country_stats,
+        "initial_configs": stats["initial"],
+        "invalid_removed": stats["invalid"],
+        "fake_removed": stats["fake"],
+        "after_dedup": stats["after_dedup"],
+        "removed_duplicates": stats["initial"] - stats["invalid"] - stats["fake"] - stats["after_dedup"],
+        "geoip_known": known_country,
+        "geoip_unknown": country_stats.get("??", 0),
+        "outputs": {
+            "vless": len(vless_out),
+            "vmess": len(vmess_out),
+            "trojan": len(trojan_out),
+            "ss": len(ss_out),
+            "hiddify": len(vless_out[:100]),
+            "all": len(all_out),
+        },
+        "country_distribution": dict(sorted(country_stats.items(), key=lambda x: -x[1])),
         "latency_summary_ms": latency_summary,
         "top10_fastest_countries": top_fast,
     }
@@ -428,6 +647,7 @@ async def run() -> None:
 
     print("✅ جمع‌آوری با موفقیت انجام شد.")
     print(f"📊 گزارش در {LOGGER_FILE} ذخیره گردید.")
+    print(f"   خام: {stats['initial']} | نامعتبر: {stats['invalid']} | جعلی: {stats['fake']} | نهایی: {stats['after_dedup']}")
 
 def main() -> None:
     try:
@@ -436,6 +656,7 @@ def main() -> None:
         print("⏹️ اجرا توسط کاربر متوقف شد.")
     except Exception as e:
         print(f"❌ خطای غیرمنتظره: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
