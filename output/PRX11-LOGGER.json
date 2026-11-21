@@ -1,20 +1,20 @@
 {
-  "updated_at_iran": "2026-11-21 17:43:19",
-  "initial_configs": 41470,
-  "invalid_removed": 4417,
-  "fake_removed": 352,
+  "updated_at_iran": "2026-11-22 02:17:01",
+  "initial_configs": 42047,
+  "invalid_removed": 4257,
+  "fake_removed": 325,
   "telegram_configs": 487,
-  "after_dedup": 10811,
-  "removed_duplicates": 25890,
-  "geoip_known": 2271,
-  "geoip_unknown": 8536,
+  "after_dedup": 10972,
+  "removed_duplicates": 26493,
+  "geoip_known": 2278,
+  "geoip_unknown": 8690,
   "outputs": {
     "vless": 1000,
     "vmess": 1000,
     "trojan": 1000,
     "ss": 1000,
     "hiddify": 200,
-    "all": 10053
+    "all": 10199
   },
   "hiddify_country_distribution": {
     "DE": 5,
@@ -25,8 +25,9 @@
     "US": 5,
     "GB": 5,
     "FI": 5,
-    "SE": 4,
+    "SE": 5,
     "CH": 4,
+    "AT": 4,
     "CA": 4,
     "PL": 4,
     "SG": 4,
@@ -36,298 +37,316 @@
     "JP": 4,
     "HK": 4,
     "IT": 4,
+    "RU": 4,
+    "IN": 4,
+    "CZ": 4,
+    "EE": 4,
     "LT": 4,
+    "LV": 4,
+    "MD": 4,
+    "ES": 4,
     "RS": 4,
     "BG": 4,
-    "RU": 4,
-    "CZ": 4,
-    "LV": 4,
-    "KZ": 4,
-    "IN": 4,
-    "EE": 4,
-    "NO": 4,
-    "ES": 4,
+    "BR": 4,
     "BY": 4,
-    "MD": 4,
-    "BZ": 4,
-    "CY": 4,
+    "NO": 4,
+    "KZ": 4,
     "SC": 4,
+    "CY": 4,
+    "TW": 4,
+    "BE": 4,
     "??": 4,
-    "AT": 3,
-    "GR": 3,
     "VN": 3,
-    "BR": 3,
-    "CR": 3,
-    "BE": 3,
-    "IE": 3,
+    "KR": 3,
+    "BZ": 3,
+    "ID": 3,
     "LU": 2,
-    "AM": 2,
-    "TW": 2,
-    "NZ": 2,
-    "CW": 2,
-    "DK": 2,
-    "ZA": 2,
-    "KR": 2,
+    "MY": 2,
+    "UZ": 2,
+    "CR": 2,
     "AL": 2,
-    "TH": 2,
     "SK": 1,
-    "IL": 1,
-    "GE": 1,
-    "UZ": 1,
-    "MY": 1,
     "SI": 1,
-    "MX": 1
+    "DK": 1,
+    "AQ": 1,
+    "MK": 1,
+    "IL": 1,
+    "UA": 1,
+    "IQ": 1,
+    "GR": 1,
+    "MX": 1,
+    "IE": 1,
+    "CN": 1,
+    "TH": 1
   },
   "country_distribution": {
-    "??": 8536,
-    "US": 741,
-    "DE": 321,
-    "NL": 216,
-    "RU": 138,
-    "FR": 87,
-    "FI": 79,
-    "IR": 79,
-    "GB": 76,
-    "SE": 75,
-    "TR": 71,
-    "PL": 52,
-    "JP": 28,
-    "SG": 26,
-    "LT": 24,
-    "HK": 24,
-    "BG": 23,
-    "EE": 22,
-    "IN": 13,
-    "CH": 11,
+    "??": 8690,
+    "US": 716,
+    "DE": 346,
+    "NL": 198,
+    "RU": 134,
+    "FR": 96,
+    "IR": 93,
+    "TR": 80,
+    "SE": 79,
+    "FI": 78,
+    "GB": 62,
+    "PL": 53,
+    "SG": 27,
+    "EE": 23,
+    "JP": 21,
+    "HK": 21,
+    "LT": 18,
+    "BG": 15,
+    "CH": 14,
+    "IN": 14,
+    "ES": 14,
+    "AE": 12,
+    "KZ": 12,
+    "CA": 11,
+    "LV": 11,
     "RS": 11,
-    "CA": 10,
-    "LV": 10,
-    "KZ": 10,
-    "IT": 10,
-    "ES": 8,
-    "NO": 7,
-    "CZ": 6,
-    "CY": 6,
-    "AU": 5,
-    "AE": 5,
-    "BY": 5,
-    "MD": 5,
-    "RO": 4,
-    "BZ": 4,
+    "IT": 11,
+    "AU": 8,
+    "TW": 8,
+    "MD": 7,
+    "SC": 7,
+    "NO": 6,
+    "AT": 5,
+    "RO": 5,
+    "CZ": 5,
+    "BR": 5,
+    "CN": 5,
+    "BY": 4,
+    "CY": 4,
     "BE": 4,
-    "SC": 4,
-    "AT": 3,
-    "GR": 3,
     "VN": 3,
-    "BR": 3,
-    "TW": 3,
-    "CR": 3,
     "KR": 3,
-    "IE": 3,
-    "CN": 3,
+    "BZ": 3,
+    "ID": 3,
     "LU": 2,
-    "AM": 2,
-    "NZ": 2,
-    "CW": 2,
     "DK": 2,
-    "ZA": 2,
+    "MY": 2,
+    "UZ": 2,
+    "CR": 2,
     "AL": 2,
-    "TH": 2,
     "SK": 1,
-    "IL": 1,
-    "GE": 1,
-    "UZ": 1,
-    "MY": 1,
     "SI": 1,
+    "AQ": 1,
+    "MK": 1,
+    "IL": 1,
+    "UA": 1,
+    "IQ": 1,
+    "GR": 1,
     "MX": 1,
-    "ID": 1
+    "IE": 1,
+    "TH": 1
   },
   "source_distribution": {
-    "vless": 4486,
-    "vmess": 3476,
-    "ss": 1574,
-    "trojan": 1006,
+    "vless": 4622,
+    "vmess": 3493,
+    "ss": 1575,
+    "trojan": 1012,
     "@v2ray_configs": 195,
     "@FreeV2rayConfig": 32,
     "@vpnowl": 20,
     "@v2rayng_fars": 8,
     "@v2rayngpro": 7,
-    "@v2rayfree": 3
+    "@v2rayfree": 3,
+    "@v2ray_ng": 1
   },
   "latency_summary_ms": {
     "US": {
-      "avg": 123.7,
-      "min": 25.6,
-      "max": 618.4,
-      "samples": 79
-    },
-    "NL": {
-      "avg": 498.2,
-      "min": 326.6,
-      "max": 899.9,
-      "samples": 14
+      "avg": 120.0,
+      "min": 22.7,
+      "max": 904.3,
+      "samples": 94
     },
     "??": {
-      "avg": 397.6,
-      "min": 28.1,
-      "max": 1561.1,
-      "samples": 40
+      "avg": 348.4,
+      "min": 25.6,
+      "max": 1875.1,
+      "samples": 62
     },
-    "DE": {
-      "avg": 507.8,
-      "min": 365.3,
-      "max": 808.8,
+    "NL": {
+      "avg": 622.5,
+      "min": 430.5,
+      "max": 1213.4,
       "samples": 12
     },
+    "DE": {
+      "avg": 588.8,
+      "min": 472.3,
+      "max": 799.8,
+      "samples": 13
+    },
     "LU": {
-      "avg": 83.9,
-      "min": 83.9,
-      "max": 83.9,
+      "avg": 202.5,
+      "min": 202.5,
+      "max": 202.5,
       "samples": 1
     },
-    "GB": {
-      "avg": 418.8,
-      "min": 345.6,
-      "max": 647.0,
-      "samples": 7
-    },
     "SE": {
-      "avg": 462.5,
-      "min": 429.7,
-      "max": 491.5,
+      "avg": 540.1,
+      "min": 472.1,
+      "max": 625.6,
       "samples": 3
     },
-    "LT": {
-      "avg": 283.9,
-      "min": 235.2,
-      "max": 332.6,
-      "samples": 2
-    },
-    "IR": {
-      "avg": 4963.1,
-      "min": 385.0,
-      "max": 30817.5,
-      "samples": 7
-    },
-    "RO": {
-      "avg": 463.0,
-      "min": 460.3,
-      "max": 465.6,
-      "samples": 2
-    },
-    "PL": {
-      "avg": 690.8,
-      "min": 489.4,
-      "max": 983.0,
-      "samples": 4
+    "GB": {
+      "avg": 496.9,
+      "min": 461.6,
+      "max": 583.1,
+      "samples": 5
     },
     "FI": {
-      "avg": 730.9,
-      "min": 665.3,
-      "max": 796.5,
-      "samples": 2
+      "avg": 754.3,
+      "min": 610.9,
+      "max": 925.6,
+      "samples": 5
     },
-    "RS": {
-      "avg": 468.3,
-      "min": 435.7,
-      "max": 520.3,
+    "PL": {
+      "avg": 537.1,
+      "min": 506.3,
+      "max": 577.4,
       "samples": 3
     },
-    "BG": {
-      "avg": 465.5,
-      "min": 437.3,
-      "max": 519.0,
-      "samples": 3
+    "IR": {
+      "avg": 3236.9,
+      "min": 477.8,
+      "max": 30852.4,
+      "samples": 13
     },
     "JP": {
-      "avg": 442.4,
-      "min": 442.4,
-      "max": 442.4,
+      "avg": 845.0,
+      "min": 372.6,
+      "max": 1317.3,
+      "samples": 2
+    },
+    "RO": {
+      "avg": 543.8,
+      "min": 543.8,
+      "max": 543.8,
+      "samples": 1
+    },
+    "SG": {
+      "avg": 736.7,
+      "min": 670.1,
+      "max": 888.2,
+      "samples": 4
+    },
+    "BY": {
+      "avg": 514.7,
+      "min": 514.7,
+      "max": 514.7,
+      "samples": 1
+    },
+    "RS": {
+      "avg": 874.2,
+      "min": 536.9,
+      "max": 1719.1,
+      "samples": 5
+    },
+    "BG": {
+      "avg": 551.1,
+      "min": 551.1,
+      "max": 551.1,
       "samples": 1
     },
     "RU": {
-      "avg": 948.5,
-      "min": 499.5,
-      "max": 2248.9,
-      "samples": 16
-    },
-    "MD": {
-      "avg": 562.3,
-      "min": 562.3,
-      "max": 562.3,
-      "samples": 1
+      "avg": 796.3,
+      "min": 555.1,
+      "max": 1647.4,
+      "samples": 12
     },
     "EE": {
-      "avg": 648.1,
-      "min": 589.3,
-      "max": 688.1,
-      "samples": 3
+      "avg": 764.2,
+      "min": 575.9,
+      "max": 952.5,
+      "samples": 2
     },
-    "SG": {
-      "avg": 959.7,
-      "min": 808.8,
-      "max": 1045.5,
-      "samples": 3
+    "MD": {
+      "avg": 585.6,
+      "min": 585.6,
+      "max": 585.6,
+      "samples": 1
+    },
+    "TR": {
+      "avg": 737.6,
+      "min": 737.6,
+      "max": 737.6,
+      "samples": 1
     },
     "KZ": {
-      "avg": 738.3,
-      "min": 738.3,
-      "max": 738.3,
+      "avg": 712.8,
+      "min": 712.8,
+      "max": 712.8,
       "samples": 1
     },
     "IN": {
-      "avg": 993.8,
-      "min": 993.8,
-      "max": 993.8,
+      "avg": 937.6,
+      "min": 937.6,
+      "max": 937.6,
+      "samples": 1
+    },
+    "LT": {
+      "avg": 983.0,
+      "min": 983.0,
+      "max": 983.0,
+      "samples": 1
+    },
+    "FR": {
+      "avg": 1619.5,
+      "min": 1619.5,
+      "max": 1619.5,
       "samples": 1
     },
     "VN": {
-      "avg": 3412.1,
-      "min": 3412.1,
-      "max": 3412.1,
+      "avg": 2207.3,
+      "min": 2207.3,
+      "max": 2207.3,
       "samples": 1
     }
   },
   "top10_fastest_countries": [
     [
-      "LU",
-      83.9
-    ],
-    [
       "US",
-      123.7
+      120.0
     ],
     [
-      "LT",
-      283.9
+      "LU",
+      202.5
     ],
     [
       "??",
-      397.6
+      348.4
     ],
     [
       "GB",
-      418.8
+      496.9
     ],
     [
-      "JP",
-      442.4
+      "BY",
+      514.7
+    ],
+    [
+      "PL",
+      537.1
     ],
     [
       "SE",
-      462.5
+      540.1
     ],
     [
       "RO",
-      463.0
+      543.8
     ],
     [
       "BG",
-      465.5
+      551.1
     ],
     [
-      "RS",
-      468.3
+      "MD",
+      585.6
     ]
   ]
 }
